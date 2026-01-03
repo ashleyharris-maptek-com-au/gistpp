@@ -1,0 +1,12 @@
+This is an executable that can be used to format SCAD files. 
+
+It uses [a library](scad-format-dll.gistpp) to do formatting.
+
+# Behavior:
+
+- Similar command line arguments to clang-format.
+- searches for .scad-format files in the same directory as the file to format, and in parent directories, until it finds one.
+- can process via stdin, or a file, or a directory. 
+- has a recursive argument to process directories recursively.
+
+

@@ -1,0 +1,148 @@
+This is a library that can be used to format SCAD files. 
+
+# Structure:
+
+- Struct ScadFormatSettings
+  - MaxLineWidth 
+  - IndentationSpaces
+  - BraceStyle (an enum: Allman, GNU, Linux, Stroustrup, etc.)
+  - From/ToFile & From/ToStream & From/ToString
+
+- Class ScadFormatter
+  - Constructed with optional ScadFormatSettings 
+  - FormatFile(string filePath, ScadFormatSettings settings)
+  - FormatStream(Stream stream, ScadFormatSettings settings)
+  - FormatString(string scadCode, ScadFormatSettings settings)
+
+- Class Tokeniser
+
+# Behavior:
+
+## Formats messy openSCAD code into clean code
+
+Passing unformatted code to the formatter will result in formatted code:
+
+``` psuedocode
+code = {input}
+
+s = ScadFormatSettings({settings})
+formattedCode = ScadFormatter(s).FormatString(code)
+
+assert formattedCode == {output}
+```
+
+### Test case 1 - basic example:
+
+``` openSCAD input
+module foo() {
+projection()  rotate([0,0,90])translate([10, 10, 10])cube([10, 10, 10]);   } foo();
+translate([10, 10, 
+10]) foo();
+```
+
+``` settings
+ScadFormatSettings(MaxLineWidth = 120)
+```
+
+``` openSCAD output
+module foo() 
+{
+   projection() 
+   rotate([0,0,90])
+   translate([10, 10, 10])
+   cube([10, 10, 10]);   
+}
+
+foo();
+translate([10, 10, 10]) foo();
+```
+
+## Maintains clean code
+When giving clean code to the formatter, it will return the same code unmodified.
+```
+code = {inputAndOutput}
+s = ScadFormatSettings({settings})
+formattedCode1 = ScadFormatter(s).FormatString(code)
+assert formattedCode1 == code
+
+badCode = code.replace("  ", " ") # Mess up the indentation
+formattedCode2 = ScadFormatter(s).FormatString(badCode)
+assert formattedCode2 == code
+```
+### Long array arguments:
+
+``` settings
+ColumnLimit=80
+BraceStyle=Allman
+```
+
+``` openSCAD inputAndOutput
+module base4x4(Xspots = [-160, -80, 0, 80, 160],
+               Yspots = [-160, -80, 0, 80, 160])
+{
+    blah();
+}
+```
+
+### Long array arguments with comments
+When comments ruin the simplicity of the token-based formatting, we still have to
+do a decent format. Here the 'apex' and 'west face' comments mean there's an awkward
+`],` on a line by itself, but we still have to indent the arguments so they line
+up nicely.
+
+``` openSCAD inputAndOutput
+module smooth_pyramid() {
+    base = n_base * stone_size; // 19,000mm
+    height = n_base * stone_size; // 19,000mm
+
+    polyhedron(points = [[-base / 2, -base / 2, 0], // 0: Southwest corner
+                         [base / 2, -base / 2, 0], // 1: Southeast corner
+                         [base / 2, base / 2, 0], // 2: Northeast corner
+                         [-base / 2, base / 2, 0], // 3: Northwest corner
+                         [0, 0, height] // 4: Apex
+                        ], 
+               faces = [[0, 1, 2, 3], // Base
+                        [0, 1, 4], // South face
+                        [1, 2, 4], // East face
+                        [2, 3, 4], // North face (+Y)
+                        [3, 0, 4] // West face
+                       ]);
+}
+```
+
+### Make sure we lay out tokens like 'else' correctly under allman
+``` settings
+BraceStyle=Allman
+```
+
+``` openSCAD inputAndOutput
+module base4x4(Xspots = [-160, -80, 0, 80, 160], Yspots = [-160, -80, 0, 80, 160])
+{
+  minkowski(10)
+  {
+    difference()
+    {
+      union()
+      {
+        for(x = Xspots)
+        {
+          translate([x, 0, 0]) cube([10, 330, 10], center = true);
+        }
+        for(y = Yspots)
+        {
+          translate([0, y, 0]) cube([330, 10, 10], center = true);
+        }
+      }
+      children();
+    }
+    if($preview)
+    {
+      cube(5, center = true);
+    }
+    else
+    {
+      sphere(5, $fn = 36);
+    }
+  }
+}
+```
