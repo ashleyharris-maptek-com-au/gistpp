@@ -1,7 +1,7 @@
 
 GistPP formalises the next level of the software development tech stack:
 
-<center>![Tech Stack](techStack.jpg)</center>
+<center> ![Tech Stack](techStack.jpg) </center>
 
 Combing the rapid development capabilities of LLMs and vibe coding, with the structure and safety of established
 software development practices, such as tests, formalised interfaces.
