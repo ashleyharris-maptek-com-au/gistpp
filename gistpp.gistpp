@@ -1,0 +1,183 @@
+# Overview
+An executable that uses an LLM service to processes gistpp files.
+
+The steps are roughly as follows:
+
+1. Work out what we're building:
+
+This does NOT include programming language, os, framework, etc. Those choices are intentionally undefined at this point.
+
+It's either a:
+- Library: such as a static library, a DLL, a python package, a rust crate, etc.
+- Executable: such as a console application, a python/bash/bat script, or a headless application.
+- (NYI - Ignore) UI Application: such as a GUI application, a mobile app, a windows store app, etc.
+- (NYI - Ignore) WebFrontEnd: a web application or website.
+- (NYI - Ignore) Experience: defining part of a UI or website. Such as a user story, a process, a workflow, a pannel.
+- (NYI - Ignore) BackgroundTask: a service, background task, worker thread, or similar. Running on the same device.
+- (NYI - Ignore) CloudService: a API endpoint, website backend, database.
+
+2. Generate or update the interface.
+   - The interface is a high level overview of the inputs and outputs of the code.
+   - It has (TODO - will have eventually) a schema for each output type.
+   - This could be as simple as a list of function signatures, types, and constants for a library.
+   - Or UI layouts for a UI application / experience or web front end.
+   - What files are read/written etc.
+   - Edge cases, that are (TODO - NYI)
+     - Device interaction, needed for things like printing, scanning, audio output. etc.
+     - Sockets or rest endpoints or listeners for servers or clients or etc.
+     - Embedded systems often need exact addressable memory.
+     - Drivers might need a whole bunch hardware interface specs.
+   - If it is already present, work out if we need to update it.
+
+3. Generate or update the tests.
+   - The tests work with the interface. For a library, this may be a set of unit tests.
+   - For an executable, this may be a set of integration tests.
+   - For a UI application, this may involve screenshots and simulated user interactions.
+   - It has a schema for each output type.
+
+4. Check dependencies.
+   - Look for linked gistpp files, and make sure they're built and up to date.
+
+5. Decide on the programming language, os, framework, etc.
+   - This may have been specified by the user, inferred from requirements or output filename, inferred from what tooling is supported, left to the LLM.
+   - There could be multiple.
+
+6. Invoke a LLM service to generate the code and tests in the chosen language / framework / etc.
+  - These go in a build folder / temp folder / etc.
+
+7. Build, test, and iterate until the code passes the tests.
+   - Accept that the code gen may tweak the interface and tests as needed, and this should be fed back.
+
+# Structure
+- Parser and preprocessor. 
+  - Process the gistpp file into a tree of nodes using a markdown parser.
+  - Fetch links and include files.
+- Abstract base class LLMSession
+  - implementions for OpenAI, Anthropic, Gemini, etc. This is a simple wrapper around thier APIs.
+  - Includes conversation memory, system prompt, tool calling for file read/write.
+- Type-specific processors:
+  - Uses the LLM to help refine the interface and tests based on the code type.
+  - Incremementally adjusts the interface and tests if they already existed.
+- Code generator backend:
+  - Uses the LLM to generate the code and tests.
+  - Builds all and runs tests.
+  - Adjusts the interface and tests if problems are detected.
+  - Repeats until the code passes the tests.
+
+# Behavior
+
+## Compiles a simple executable
+
+### Hellow world test:
+
+``` gistpp helloWorld.gistpp
+if called with no arguments, it responds "Hello World"
+if called with an argument, it responds "Hello {argument}"
+```
+
+gistpp helloWorld.gistpp -o helloWorld.exe
+
+``` cmd
+$ helloWorld.exe
+Hello World
+$ helloWorld.exe foo
+Hello foo
+```
+
+helloWorld.interface contains something like:
+> {
+>    "PositionalArgs" : [{"Name" : "your_name", "Type" : "string", "Optional" : true}]
+>    "StdOut" : {"Type" : "string", "Description" : "The response"}
+> }
+
+helloWorld.tests contains a JSON representation of some trivial tests.
+
+There's a folder somewhere in temp (or build/) containing:
+- the actual generated source code.
+- most compiler intermediate files. 
+- the actual generated tests.
+
+The backend chosen wasn't defined, it might have been C++, Rust, C, C#, or whatever was available.
+
+We can also specify the backend:
+``` bash
+gistpp helloWorld.gistpp -o helloWorld.exe -a Cpp23Clang18
+```
+
+Sometimes backend could be implied from the file type:
+``` bash
+$ gistpp helloWorld.gistpp -o helloWorld.py
+$ python helloWorld.py Arg
+Hello Arg
+```
+
+## Compile a simple library
+
+``` gistpp math.gistpp
+A simple vector math library, including addition, subtraction, multiplication, division, and length.
+2D, 3D, and 4D vectors are supported.
+
+# Behavior
+> v1 = Vector2(1, 2)
+> v2 = Vector2(3, 4)
+> v3 = v1 + v2
+> assert v3 == Vector2(4, 6)
+```
+
+When compiled with a command like:
+
+``` bash
+gistpp math.gistpp -o math.so
+```
+
+json math.interface contains something like
+>[
+> {
+>    "Type" : "Vector2",
+>    "Fields" : [
+>        {"Name" : "X", "Type" : "float64"},
+>        {"Name" : "Y", "Type" : "float64"}
+>    ],
+>    "Methods" : [
+>        { "Name" : "Length", "Args" : [], "Returns" : "float64", "Flags" : ["ReadOnly"]}
+
+>    ]
+> },
+> {
+>    "Type" : "Vector3",
+>    "Fields" : [
+>        {"Name" : "X", "Type" : "float64"},
+>        {"Name" : "Y", "Type" : "float64"},
+>        {"Name" : "Z", "Type" : "float64"},
+>    ],
+>    "Methods" : [
+>        { "Name" : "Length", "Args" : [], "Returns" : "float64", "Flags" : ["ReadOnly"]}
+
+>    ]
+> },
+> {
+>    "Type" : "Vector4",
+>    "Fields" : [
+>        {"Name" : "X", "Type" : "float64"},
+>        {"Name" : "Y", "Type" : "float64"},
+>        {"Name" : "Z", "Type" : "float64"},
+>        {"Name" : "W", "Type" : "float64"}
+>    ],
+>    "Methods" : [
+>        { "Name" : "Length", "Args" : [], "Returns" : "float64", "Flags" : ["ReadOnly"]}
+
+>    ]
+> },
+> { "Type" : "BinaryOperator", "Name" : "+", "Args" : [{"Name" : "a", "Type" : "Vector2"},{"Name" : "b", "Type" : "Vector2"}], "Returns" : "Vector2"}
+> { "Type" : "BinaryOperator", "Name" : "-", "Args" : [{"Name" : "a", "Type" : "Vector2"},{"Name" : "b", "Type" : "Vector2"}], "Returns" : "Vector2"}
+> { "Type" : "BinaryOperator", "Name" : "*", "Args" : [{"Name" : "a", "Type" : "Vector2"},{"Name" : "b", "Type" : "Vector2"}], "Returns" : "Vector2"}
+> { "Type" : "BinaryOperator", "Name" : "/", "Args" : [{"Name" : "a", "Type" : "Vector2"},{"Name" : "b", "Type" : "Vector2"}], "Returns" : "Vector2"}
+>]
+
+```json math.tests
+[
+    "v1 = Vector2(1, 2); v2 = Vector2(3, 4); v3 = v1 + v2; assert v3 == Vector2(4, 6)",
+    "(and likely hundreds more)"
+]
+```
+

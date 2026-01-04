@@ -1,0 +1,68 @@
+A library that allows the storing, retrieving, and searching of markdown documents as if they were a database.
+
+# Structure
+
+Class MarkdownDocument
+- Construct from string, stream, or file
+- Inherits from Container
+
+Class Container
+- Iterate over children (begin/end/advanced/operators/etc)
+- Text get/set (whitespace trimmed)
+- Spacing / padding / indentation information needed to roundtrip a document losslessly
+- Type enum (Root, Heading 1-4, Paragraph, Link, Image, List, ListItem, etc.)
+- Save (as if this was root) to string, stream, or file
+
+# Behavior
+
+``` Markdown doc1.md
+TextA
+# Section 1
+## Section 1.1
+TextB ![image](image.png) TextC
+# Section 2
+## Section 2.1
+### Section 2.1
+TextD
+```
+
+## Browse and iterate:
+
+``` PsuedoCode
+md = MarkdownDocument(doc1.md)
+
+assert md.Type == Root
+
+tl = list(md) 
+assert tl[0].Text() == "TextA"
+assert tl[1].Type == Heading1
+assert tl[1].Text() == "Section 1"
+assert tl[2].Type == Heading1
+assert tl[2].Text() == "Section 2"
+
+for c in tl[1]:
+  if c.Type == Heading2:
+    assert c.Text() == "Section 1.1"
+  elif c.Type == Paragraph:
+    
+    for d in c:
+      if d.Type == Link:
+        assert d.Text() == "image"
+        assert d.Href() == "image.png"
+      else:
+        assert d.Type == Text
+        assert d.Text() == "TextB" || d.Text() == "TextC"
+
+```
+
+## Serialise:
+
+``` PsuedoCode
+md = MarkdownDocument(doc1.md)
+
+assert md[1][0][0].ToString() == "TextB [image](image.png) TextC"
+
+md[1][0][0][0].Text = "TextB2"
+assert md[1][0][0].ToString() == "TextB2 [image](image.png) TextC"
+```
+

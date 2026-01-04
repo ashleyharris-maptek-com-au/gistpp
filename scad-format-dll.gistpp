@@ -69,7 +69,7 @@ badCode = code.replace("  ", " ") # Mess up the indentation
 formattedCode2 = ScadFormatter(s).FormatString(badCode)
 assert formattedCode2 == code
 ```
-### Long array arguments:
+### Test case - Long array arguments:
 
 ``` settings
 ColumnLimit=80
@@ -84,7 +84,7 @@ module base4x4(Xspots = [-160, -80, 0, 80, 160],
 }
 ```
 
-### Long array arguments with comments
+### Test case: Long array arguments with comments
 When comments ruin the simplicity of the token-based formatting, we still have to
 do a decent format. Here the 'apex' and 'west face' comments mean there's an awkward
 `],` on a line by itself, but we still have to indent the arguments so they line
@@ -110,7 +110,7 @@ module smooth_pyramid() {
 }
 ```
 
-### Make sure we lay out tokens like 'else' correctly under allman
+### Test case: Make sure we lay out tokens like 'else' correctly under allman
 ``` settings
 BraceStyle=Allman
 ```
