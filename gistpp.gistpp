@@ -1,5 +1,39 @@
 # Overview
-An executable that uses an LLM service to processes gistpp files.
+An executable that uses an LLM service to processes gistpp files into an output, perhaps an executable or a library.
+
+# Structure
+- Parser and preprocessor. 
+  - Process the gistpp file into a tree of nodes using a markdown parser.
+  - Follow links to additional information (*.gistpp files)
+  - Follow links to required libraries via their interface files (*.interface files)
+  - Verify dependancies exist and catch cyclic includes.
+- Abstract base class LLMSession
+  - implementations for OpenAI, Anthropic, Gemini, etc. This is a simple wrapper around their APIs.
+  - Includes:
+    - Conversation memory
+      - Needed so that iterative build-and-test-and-fix can be done.
+      - Ability to compact down into a simple 'state' to save tokens.
+    - System prompt
+    - Tool calling for file read/write.
+      - Only allowing read / write access to the output file, build folder, and temp folder.
+      - Only allowing read access to dependancies and project folder.
+      - Sensible limits for things like max bytes read / written, tool call count, etc.
+      - For structured output (as Gemini does not allow structured output + Tools concurrently, and we want structured output)
+    - If offered: LLM hosted code execution and web search. (not on dev pc, on the LLM's server)
+    - Exponential-backoff on rate limit hit.
+    - Retry, backoff, and then abort on network error or bad output.
+    - Errors like safety filters / out of credit / etc. abort the build gracefully.
+- Type-specific processors:
+  - Uses the LLM to help refine the interface and tests based on the code type.
+- Code generator backend:
+  - Uses the LLM to generate the code and tests.
+  - Builds all and runs tests.
+     - (TODO for v1, but not initial hacky bootstrap) default to running tests in a VM or restricted user account.
+     - (TODO for v1, but not initial hacky bootstrap) configurable timeout controls, max memory.
+  - If allowed, adjusts the interface and tests if problems are detected (otherwise error)
+  - Repeats until the code passes the tests, the LLM gives up, or maximum iterations are reached.
+
+# Behavior
 
 The steps are roughly as follows:
 
@@ -16,7 +50,11 @@ It's either a:
 - (NYI - Ignore) BackgroundTask: a service, background task, worker thread, or similar. Running on the same device.
 - (NYI - Ignore) CloudService: a API endpoint, website backend, database.
 
-2. Generate or update the interface.
+2. Check dependencies and hash check.
+   - Look for linked gistpp files included in the gistpp file, and make sure they're built and up to date.
+   - Calculate a hash of everything that goes into the build, (details TODO for bootstrap, probably just a hash of the final binary) as we might be able to skip the build.
+
+3. Generate or update the interface.
    - The interface is a high level overview of the inputs and outputs of the code.
    - It has (TODO - will have eventually) a schema for each output type.
    - This could be as simple as a list of function signatures, types, and constants for a library.
@@ -29,65 +67,66 @@ It's either a:
      - Drivers might need a whole bunch hardware interface specs.
    - If it is already present, work out if we need to update it.
 
-3. Generate or update the tests.
+
+4. Plan the tests.
    - The tests work with the interface. For a library, this may be a set of unit tests.
    - For an executable, this may be a set of integration tests.
    - For a UI application, this may involve screenshots and simulated user interactions.
-   - It has a schema for each output type.
+   - It has (TODO - will have eventually) a schema for each output type.
+   - There are two 'levels' of tests, contract and useful.
+     - A contract test is immutable and can't change without user approval.
+     - A 'useful' test is one that helps debug an issue, explain a feature, check an edge case, improve code coverage, etc.
+   - The LLM should brainstorm additional tests to cover edge cases or untested code.
+   - This does not involve writing the tests yet. We can't until we know the backend. 
+     - They're left as a high level psuedocode for the moment.
 
-4. Check dependencies.
-   - Look for linked gistpp files, and make sure they're built and up to date.
 
 5. Decide on the programming language, os, framework, etc.
-   - This may have been specified by the user, inferred from requirements or output filename, inferred from what tooling is supported, left to the LLM.
+   - This may have been specified by the user, inferred from requirements or output filename, or inferred from what tooling is supported (with LLM choice if multiple availabe).
    - There could be multiple.
 
 6. Invoke a LLM service to generate the code and tests in the chosen language / framework / etc.
   - These go in a build folder / temp folder / etc.
+  - recieves interface as a constraint and must implement it or report an error.
 
 7. Build, test, and iterate until the code passes the tests.
-   - Accept that the code gen may tweak the interface and tests as needed, and this should be fed back.
+   - The LLM can adjust 'useful' tests to help with development, but not 'contract' tests (unless a flag is specified).
+   - (TODO for v1, but not initial hacky bootstrap) 
+     - default to running tests in a VM or restricted user account.
+     - configurable timeout controls, max memory.
+   - Timeout if a configurable execution count is hit.
 
-# Structure
-- Parser and preprocessor. 
-  - Process the gistpp file into a tree of nodes using a markdown parser.
-  - Fetch links and include files.
-- Abstract base class LLMSession
-  - implementions for OpenAI, Anthropic, Gemini, etc. This is a simple wrapper around thier APIs.
-  - Includes conversation memory, system prompt, tool calling for file read/write.
-- Type-specific processors:
-  - Uses the LLM to help refine the interface and tests based on the code type.
-  - Incremementally adjusts the interface and tests if they already existed.
-- Code generator backend:
-  - Uses the LLM to generate the code and tests.
-  - Builds all and runs tests.
-  - Adjusts the interface and tests if problems are detected.
-  - Repeats until the code passes the tests.
+8. Report success, failure, or changes to established behavior.
+   - If this wasn't the first build, and the interface changed, report it as a warning.
+   - If this wasn't the first build, and a previously written test required changing, report it as a warning.
 
-# Behavior
-
-## Compiles a simple executable
+## For example, compiling a simple executable
 
 ### Hellow world test:
 
 ``` gistpp helloWorld.gistpp
 if called with no arguments, it responds "Hello World"
-if called with an argument, it responds "Hello {argument}"
+if called with a single argument, it responds "Hello {argument}"
 ```
 
-gistpp helloWorld.gistpp -o helloWorld.exe
+(behaviour and structure are simple enough they are inferred from the description.)
+
 
 ``` cmd
+$ gistpp helloWorld.gistpp -o helloWorld.exe
+
 $ helloWorld.exe
 Hello World
+
 $ helloWorld.exe foo
 Hello foo
 ```
 
-helloWorld.interface contains something like:
+helloWorld.interface contains something like: (This spec is not been finalised yet)
 > {
->    "PositionalArgs" : [{"Name" : "your_name", "Type" : "string", "Optional" : true}]
->    "StdOut" : {"Type" : "string", "Description" : "The response"}
+>    "PositionalArgs" : [{"Name" : "your_name", "Type" : "string", "Optional" : true}],
+>    "StdOut" : {"Type" : "string", "Description" : "The response"},
+>    "RunAs" : "ConsoleApplication"
 > }
 
 helloWorld.tests contains a JSON representation of some trivial tests.
@@ -104,7 +143,7 @@ We can also specify the backend:
 gistpp helloWorld.gistpp -o helloWorld.exe -a Cpp23Clang18
 ```
 
-Sometimes backend could be implied from the file type:
+Or the backend could be implied from the file type:
 ``` bash
 $ gistpp helloWorld.gistpp -o helloWorld.py
 $ python helloWorld.py Arg
@@ -130,10 +169,11 @@ When compiled with a command like:
 gistpp math.gistpp -o math.so
 ```
 
-json math.interface contains something like
+json math.interface contains something like (This spec is not been finalised yet)
 >[
 > {
->    "Type" : "Vector2",
+>    "Type" : "Struct",
+>    "Name" : "Vector2",
 >    "Fields" : [
 >        {"Name" : "X", "Type" : "float64"},
 >        {"Name" : "Y", "Type" : "float64"}
@@ -144,11 +184,12 @@ json math.interface contains something like
 >    ]
 > },
 > {
->    "Type" : "Vector3",
+>    "Type" : "Struct",
+>    "Name" : "Vector3",
 >    "Fields" : [
 >        {"Name" : "X", "Type" : "float64"},
 >        {"Name" : "Y", "Type" : "float64"},
->        {"Name" : "Z", "Type" : "float64"},
+>        {"Name" : "Z", "Type" : "float64"}
 >    ],
 >    "Methods" : [
 >        { "Name" : "Length", "Args" : [], "Returns" : "float64", "Flags" : ["ReadOnly"]}
@@ -156,7 +197,8 @@ json math.interface contains something like
 >    ]
 > },
 > {
->    "Type" : "Vector4",
+>    "Type" : "Struct",
+>    "Name" : "Vector4",
 >    "Fields" : [
 >        {"Name" : "X", "Type" : "float64"},
 >        {"Name" : "Y", "Type" : "float64"},
@@ -165,19 +207,41 @@ json math.interface contains something like
 >    ],
 >    "Methods" : [
 >        { "Name" : "Length", "Args" : [], "Returns" : "float64", "Flags" : ["ReadOnly"]}
-
 >    ]
 > },
-> { "Type" : "BinaryOperator", "Name" : "+", "Args" : [{"Name" : "a", "Type" : "Vector2"},{"Name" : "b", "Type" : "Vector2"}], "Returns" : "Vector2"}
-> { "Type" : "BinaryOperator", "Name" : "-", "Args" : [{"Name" : "a", "Type" : "Vector2"},{"Name" : "b", "Type" : "Vector2"}], "Returns" : "Vector2"}
-> { "Type" : "BinaryOperator", "Name" : "*", "Args" : [{"Name" : "a", "Type" : "Vector2"},{"Name" : "b", "Type" : "Vector2"}], "Returns" : "Vector2"}
-> { "Type" : "BinaryOperator", "Name" : "/", "Args" : [{"Name" : "a", "Type" : "Vector2"},{"Name" : "b", "Type" : "Vector2"}], "Returns" : "Vector2"}
+> { "Type" : "BinaryOperator", "Name" : "+", "Args" : [{"Name" : "a", "Type" : "Vector2"},{"Name" : "b", "Type" : "Vector2"}], "Returns" : "Vector2"},
+> { "Type" : "BinaryOperator", "Name" : "-", "Args" : [{"Name" : "a", "Type" : "Vector2"},{"Name" : "b", "Type" : "Vector2"}], "Returns" : "Vector2"},
+> { "Type" : "BinaryOperator", "Name" : "*", "Args" : [{"Name" : "a", "Type" : "Vector2"},{"Name" : "b", "Type" : "Vector2"}], "Returns" : "Vector2"},
+> { "Type" : "BinaryOperator", "Name" : "/", "Args" : [{"Name" : "a", "Type" : "Vector2"},{"Name" : "b", "Type" : "Vector2"}], "Returns" : "Vector2"},
 >]
 
-```json math.tests
+```json math.tests (This spec is not been finalised yet)
 [
     "v1 = Vector2(1, 2); v2 = Vector2(3, 4); v3 = v1 + v2; assert v3 == Vector2(4, 6)",
     "(and likely hundreds more)"
 ]
 ```
+
+
+# Bootstrap
+
+The bootstrap process is Generate python code for the minimum required as per 'structure' section above:
+
+1. The parser and preprocessor. 
+    - (I've already done the markdown parser)
+    - There are no includes or dependancies for this file, so this can be skipped.
+    - The 'structure' and 'behavior' sections are short enough they can go straight into the LLMs without
+      any special handling. 
+    - This whole file can be submitted to the LLM as a single unit for the bootstrap.
+2. The ABC LLMSession
+3. One implementor of the ABC LLMSession, OpenAIChatSession
+4. The 'ConsoleApplication' processor.
+    - Manages the LLM as it's refining the interface and extra test generation (assume for bootstrap it's **always** the first time building.)
+    - Submits to the backend for actual code generation.
+    - Gets the backend to "compile" the code (python - this is a no-op)
+    - Gets the backend to run the tests and report success or failure.
+    - Retry a given number of times if it fails.
+5. The 'Python' backend.
+    - Uses the LLM to write python code.
+    - Python specific testing and building.
 

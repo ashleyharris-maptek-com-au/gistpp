@@ -1,0 +1,9 @@
+# Hello World
+
+A simple console application that greets the user.
+
+# Behavior
+
+- If called with no arguments, prints "Hello World" to stdout
+- If called with one argument, prints "Hello {argument}" to stdout
+- Exits with code 0 on success
