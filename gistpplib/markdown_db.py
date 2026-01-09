@@ -423,6 +423,77 @@ class ParagraphNode(MarkdownNode):
         return content + self._block_suffix
 
 
+class ListItemNode(MarkdownNode):
+
+    def __init__(self,
+                 raw_content: str,
+                 marker: str,
+                 indent: str,
+                 line_suffix: str,
+                 *,
+                 parent: Optional[MarkdownNode] = None) -> None:
+        super().__init__(NodeType.ListItem, parent=parent)
+        self._raw_original = raw_content
+        self._marker = marker
+        self._indent = indent
+        self._line_suffix = line_suffix
+        self._children = _parse_inlines(raw_content)
+        for c in self._children:
+            c._parent = self
+
+    @property
+    def Text(self) -> str:
+        plain = "".join(child.ToPlainText() for child in self._children)
+        return plain.strip()
+
+    def ToMarkdown(self) -> str:
+        if not self._dirty_self and not any(c.IsDirty for c in self._children):
+            content = self._raw_original
+        else:
+            content = "".join(child.ToMarkdown() for child in self._children)
+        return f"{self._indent}{self._marker}{content}{self._line_suffix}"
+
+
+class ListNode(MarkdownNode):
+
+    def __init__(self,
+                 ordered: bool,
+                 block_suffix: str,
+                 *,
+                 parent: Optional[MarkdownNode] = None) -> None:
+        super().__init__(NodeType.List, parent=parent)
+        self.Ordered = ordered
+        self._block_suffix = block_suffix
+
+    def ToMarkdown(self) -> str:
+        return "".join(child.ToMarkdown()
+                       for child in self._children) + self._block_suffix
+
+
+class BlockQuoteNode(MarkdownNode):
+
+    def __init__(self,
+                 raw_lines: List[str],
+                 block_suffix: str,
+                 *,
+                 parent: Optional[MarkdownNode] = None) -> None:
+        super().__init__(NodeType.BlockQuote, parent=parent)
+        self._raw_lines = raw_lines
+        self._block_suffix = block_suffix
+        content = "".join(re.sub(r"^>[ ]?", "", line) for line in raw_lines)
+        self._children = _parse_inlines(content)
+        for c in self._children:
+            c._parent = self
+
+    @property
+    def Text(self) -> str:
+        plain = "".join(child.ToPlainText() for child in self._children)
+        return plain.strip()
+
+    def ToMarkdown(self) -> str:
+        return "".join(self._raw_lines) + self._block_suffix
+
+
 class MarkdownDocument(MarkdownNode):
 
     def __init__(self,
@@ -465,6 +536,10 @@ class MarkdownDocument(MarkdownNode):
         fence_open_re = re.compile(
             r"^(?P<indent>[ \t]*)(?P<fence>`{3,}|~{3,})(?P<info>[^\r\n]*)(?P<eol>\r?\n)?\Z"
         )
+        list_item_re = re.compile(
+            r"^(?P<indent>[ \t]*)(?P<marker>[-*+]|\d+\.)(?P<space>[ \t]+)(?P<content>.*?)(?P<eol>\r?\n)?\Z"
+        )
+        blockquote_re = re.compile(r"^>[ ]?")
 
         def is_blank(line: str) -> bool:
             return bool(blank_line_re.match(line))
@@ -553,6 +628,61 @@ class MarkdownDocument(MarkdownNode):
                 stack_levels.append(level)
                 continue
 
+            # BlockQuote
+            if blockquote_re.match(line):
+                quote_lines: List[str] = [line]
+                i += 1
+                while i < len(lines):
+                    if is_blank(lines[i]):
+                        break
+                    if not blockquote_re.match(lines[i]):
+                        break
+                    quote_lines.append(lines[i])
+                    i += 1
+
+                block_suffix = ""
+                while i < len(lines) and is_blank(lines[i]):
+                    block_suffix += lines[i]
+                    i += 1
+
+                stack[-1]._AppendChildParsed(
+                    BlockQuoteNode(quote_lines, block_suffix))
+                continue
+
+            # List
+            lm = list_item_re.match(line)
+            if lm:
+                first_marker = lm.group("marker")
+                ordered = first_marker[-1] == "."
+                list_items: List[ListItemNode] = []
+
+                while i < len(lines):
+                    lm2 = list_item_re.match(lines[i])
+                    if not lm2:
+                        break
+                    marker2 = lm2.group("marker")
+                    is_ordered2 = marker2[-1] == "."
+                    if is_ordered2 != ordered:
+                        break
+                    indent = lm2.group("indent")
+                    marker = lm2.group("marker") + lm2.group("space")
+                    content = lm2.group("content")
+                    eol = lm2.group("eol") or ""
+                    list_items.append(
+                        ListItemNode(content, marker, indent, eol))
+                    i += 1
+
+                block_suffix = ""
+                while i < len(lines) and is_blank(lines[i]):
+                    block_suffix += lines[i]
+                    i += 1
+
+                list_node = ListNode(ordered, block_suffix)
+                for item in list_items:
+                    list_node._AppendChildParsed(item)
+                stack[-1]._AppendChildParsed(list_node)
+                continue
+
             # Paragraph
             para_lines: List[str] = [line]
             i += 1
@@ -562,6 +692,10 @@ class MarkdownDocument(MarkdownNode):
                 if heading_match(lines[i]):
                     break
                 if fence_open_match(lines[i]):
+                    break
+                if list_item_re.match(lines[i]):
+                    break
+                if blockquote_re.match(lines[i]):
                     break
                 para_lines.append(lines[i])
                 i += 1

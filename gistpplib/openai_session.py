@@ -33,8 +33,6 @@ except ImportError:
 class OpenAIChatSession(LLMSession):
     """
     OpenAI API implementation of LLMSession.
-    
-    Supports GPT-4, GPT-4-turbo, GPT-3.5-turbo, etc.
     """
 
     def __init__(
